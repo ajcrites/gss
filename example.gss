@@ -1,0 +1,7 @@
+{global-variable variable-value}
+.selector content {:name}
+   rule value
+   | .nested selector
+      nested-rule nested-value
+   |! .inheriting selector
+      other-rule other-value

@@ -1,0 +1,1122 @@
+Author: Andrew Crites
+Webzone: http://explosion-pills.com
+Contact: explosion-pills@aysites.com
+
+GSS (Glorious StyleSheets) is a parser written in Python that translates GSS into minified
+CSS for use by web browsers.  GSS can be used to translate css files on the fly, or to create css files
+to be used directly.  GSS supports the following features that CSS lacks:
+
+* variables
+* inheritance
+* nesting
+* macros
+* functions (built in to the GSS engine, but customized may be written in python)
+
+GSS really is "just another stylesheet parser."  There are more than enough, so why not add one more?
+
+GSS also automatically converts rules requiring vendor prefixes to append those prefixes.  This is maintained
+based on an up-to-date list of existing vendor prefixes for corresponding rules.
+
+GSS also focuses on compression, trying to minimize the target css filesize.
+
+GSS attempts to avoid collisions with current and future CSS syntax and should appear almost as a different
+language.
+
+GSS avoids the use of keywords in favor of relying specifically on symbols.
+
+==About this document
+
+What follows is a description of key GSS features and how to use GSS.  This works mostly by displaying
+examples of GSS with the resulting CSS side-by-side.  The resulting CSS is what would be displayed in
+no-compression mode.  GSS compresses CSS completely by default.
+
+==GSS Engine Rules
+
+When compiling a CSS from GSS, you can use the following rules
+
+===--compression
+
+Minimizes as much as possible.  Mostly, this removes nearly all whitespace, but it uses an algorithm to minimize
+selector and rule repition.  Default.
+
+===--no-compression
+
+Turn compression off.
+
+===--warning
+
+Displays warnings with invalid GSS, but tries to recover. Default.
+
+===--error
+
+Quits execution on reaching invalid GSS.
+
+===--quiet
+
+Recovers from invalid GSS silently.
+
+==Basic syntax
+
+The basic syntax or GSS is as follows.  If there are any unfamiliar terms, they will be defined later:
+
+    {global-variable variable-value}
+    (macro-definition macro-arg=macro-arg-default)
+      macro ruleset
+         macro-rule-name macro-rule-value
+         macro-rule-name {macro-arg}
+         macro-call-within-macro()
+         macro-rule-calling-global-variable {global-variable}
+      macro-global-rule-name macro-global-rule-value
+    selector {:name}
+      rule-name rule-value
+      rule-name-calling-global-variable {global-variable}
+      {local-variable variable-value}
+      rule-name-calling-local-variable {local-variable}
+      macro-call(marcro-arg)
+      (private-rule-name private-rule-value)
+      | nested ruleset
+         rule-name rule-value
+         |! deeply nested ruleset forcefully inheriting parent values
+            rule-name rule-value
+      |nested ruleset without space links parent and this rule
+         !forcefully-inherited-rule-name-from-parent
+         rule-name rule-value
+         | (private-ruleset)
+            rule-name rule-value
+    other-selector
+      :inherited-name
+    cascading-selector
+      :inherited-name
+      rule-overwriting-inherited-rule value
+
+A "ruleset" is any group of rules.  Rulesets are defined in GSS as selectors or names (selectors can be named).
+Any valid CSS selector is a valid GSS selector and defines a ruleset.  Rulesets cannot contain newlines.
+
+A "rule" is a specific style.  Rules in GSS are declared by name <space> value.  Values themselves can contain
+spaces.  A rule can be any unbroken word and can contain any value, but it cannot start with a pipe (pipes are
+not valid in CSS rule names as it is).  The colon after a rule name to signify the start of rule values
+should be omitted as should the semicolon at the end of a rule.  Instead, rules are ended with newlines.
+
+"Cascading" refers to the concept of repeating declarations to override past declarations of the same name.
+This is a key concept in CSS, and it applies even moreseo in GSS.  There is no such thing as a naming collision
+in GSS, and everything cascades.
+
+==Comments
+
+GSS can use the standard CSS comment syntax of /* comment */.  // syntax is also allowed, and comments that are
+started with a double slash continue to the end of the line.  Comments are omitted from the resulting CSS
+in compression mode, but they are left in tact in non-compression mode.  // comments are correctly converted
+to the /* */ style.
+
+GSS does not allow you to use comments as stylesheet information.  That is, you cannot escape the slash.
+
+==Variables
+
+Variable definitions in GSS are done thusly:
+
+    {var-name variable value}
+
+Variables are then deployed thisly:
+
+    {var-name}
+
+Braces are used because GSS uses whitespace for its declarations and works independently of braces.  Since CSS
+requires braces, there should never be a conflict ($ will potentially conflict with the CSS4 parent selector).
+
+Variable declarations and calls begin with an open brace followed immediately by the variable name (no space).
+
+Variables names can start with and contain any character except a space.
+Variable values can contain anything except a closing brace unless it is escaped with a prepending backslash.
+A double backslash is interpreted as a backslash, but this does not escape a following closing brace.
+You can declare multiple variables on the same line, or each on their own line.  It doesn't matter.
+
+   {valid valid} {also-valid also-valid}
+   {valid-too valid-too}
+
+Colons may have a special meaning in variable values.  These are discussed in the function section.  Until you
+have covered that section, you may want to avoid colons in variable values as these can have unexpected effects.
+
+If quotes or apostrophes are included in variable values, they will be part of the variable interpolation itself.
+
+    {var-name verdana, "comic sans"}   .ruleset {
+    .ruleset                              font-family: verdana, "comic sans";
+      font-family {var-name}           }
+
+It is not invalid in GSS to omit a closing quote or apostrophe, so you should be careful to do this as it can
+create invalid rules.
+
+    {var-name "no close quote}
+
+This would be invalid in:
+    .ruleset                        .ruleset {
+      font-family {var-name}           font-family: "no close quote;
+                                    }
+
+This would break the rest of the stylesheet.
+
+Space is NOT stripped from between the first space and the any non-space part of the variable value, or between
+such a part and the closing brace.  99% of the time this should be irrelevant, but this causes the CSS to emit
+more whitespace than necessary.
+
+   {var-name  var-value }        .ruleset {
+   .ruleset                         style:  var-value ;
+      style {var-name}           }
+
+This extra space is included irrespective of compression settings.
+
+Deploying a variable that is not yet defined in the cascade results in an error.
+
+The following is also invalid.
+
+    {var-name }
+
+You need to omit any white space when deploying a variable.
+
+===Variable declarations are scoped
+
+    {blue blue}
+
+   .ruleset                         .ruleset {
+      {blue red}                       color: red;
+      color {blue}                  }
+
+   .other-ruleset                   .other-ruleset {
+      color {blue}                     color: blue;
+                                    }
+
+Each ruleset or macro (discussed later) has its own scope.
+
+===Variables interpolate anywhere
+
+   {blue blue}
+   {color color}
+
+   .{blue}-banner                   .blue-banner {
+      {color} {blue}                   color: blue;
+                                    }
+
+You can deploy a variable at any time in GSS and it will be interpolated in-place.
+
+===Overwrite Variables
+
+You can overwrite variables by cascading.  Variables are updated in the order written
+
+    {blue blue}
+
+    .blue                           .blue {
+      color {blue} //blue              color: blue;
+                                    }
+    {blue red}
+
+    .red                            .red {
+      color {blue} //red               color: red;
+                                    }
+
+===Avoiding interpolation
+
+You should probably never have to include a literal variable name in the stylesheet, but if you want to
+prevent a variable from interpolating, prepend a backslash to the deployment call:
+
+    .rule            .rule {
+      style \{blue}     style: {blue}
+                     }
+
+The same works for variable declarations, but note that a variable declaration or deployment would make an invalid
+selector in CSS.  You can use a double backslash to emit a single backslash in CSS if it's followed by a brace.
+
+==Named Rulesets
+
+Rulesets can be named.  This is required for inheritance (covered later).  Rules are named with {:rule-name}
+syntax. The colon is required and distinguishes a name declaration from a variable deployment.  Rule names
+should come at the end of the line of the ruleset or rule.  Names are always in the global scope.
+
+    .ruleset {:name}
+       style value
+
+===Using names to group rules without a selector
+
+You may want to group some rules together in a ruleset, but you may not want these rules to apply to a selector
+in the final CSS.  Simply omit the selector.
+
+    {:name}
+      style value
+
+These will apply all rules defined in the named ruleset when the name is deployed later.  You don't ever have
+to deploy the name either, but this may make others wonder why you have it.
+
+===Naming Specific Rules
+
+You can also name rules. This is done by adding the rule name to the end of the line of the rule.  If you want
+the value to contain a literal brace-colon-characters for some reason, escape the brace with a backslash as
+you would a deployment of a variable.
+
+   .ruleset                            .ruleset {
+      style value {:name}                 style: value;
+   .ruleset                            }
+      style-two value-two \{:name}     .ruleset {
+                                          style-two: value-two {:name};
+                                       }
+
+==Inheritance
+
+Inheritance is done simply by referencing a named rule in the ruleset
+
+    .rule {:name}                                  .rule {
+      style value                                     style: value;
+    .other-ruleset                                 }
+      :name                                        .other-ruleset {
+      other-style other-value                         style: value;
+                                                      other-style: other-value;
+                                                   }
+
+You can deploy the name with a colon followed by the rule name (similar to a name declaration, but omit the
+braces).  All rules tied to the named ruleset are pulled in to the deploying ruleset.
+
+Rules are pulled in when the rule name is deployed.
+
+    .rule {:name}                                  .rule {
+      style value                                     style: value;
+    .other-ruleset                                 }
+      other-style other-value                      .other-ruleset {
+      :name                                           other-style: other-value;
+                                                      style: value;
+                                                   }
+
+Deploying a name that has not been defined in the cascade is an error.
+
+===Overwriting ruleset names
+
+You can overwrite names in the same stylesheet by cascading.
+
+    .ruleset {:name}                               .ruleset {
+      style value                                     style: value;
+                                                   }
+    .other-ruleset                                 .other-ruleset {
+      :name //all styles from .ruleset                style: value;
+                                                   }
+    .some-other-ruleset {:name}                    .some-other-ruleset {
+      other-style other-value                         other-style: other-value;
+                                                   }
+    .some-final-ruleset                            .some-final-ruleset {
+      :name //all styles from .some-other-ruleset     other-style: other-value;
+                                                   }
+
+===Names are independent of selectors
+
+   .ruleset {:name}
+      style value
+
+   .ruleset.subruleset
+      other-style other-value
+
+   .other-ruleset
+      :name //only inherits styles from .ruleset
+
+Named rulesets are independent of the selector that named them.  Remember that rulesets don't even need a
+selector in order to be named.
+
+===Private rules
+
+Rules can be kept to the master ruleset only.  These are called private rules and are surrounded by parentheses.
+
+   .ruleset {:name}                    .ruleset {
+      (private-rule private-value)        private-rule: private-value;
+      public-rule public-value            public-rule: public-value;
+                                       }
+   .other-ruleset                      .other-ruleset {
+      :name                               public-rule: public-value;
+                                       }
+
+===Grouping named rulesets
+
+Named rulesets that inherit rulesets can be referenced with all rules in tact.
+
+    .ruleset {:name}                   .rule {
+      style value                         style: value;
+    .other-ruleset {:other-name}       }
+      :name                            .other-ruleset {
+      other-style other-value             style: value;
+    .final-ruleset                        other-style: other-value;
+      :other-name                      }
+                                       .final-ruleset {
+                                          style: value;
+                                          other-style: other-value;
+                                       }
+
+Note that `.final-ruleset` inherits its rules from both .ruleset and .other-ruleset because the latter included
+rules from :name.
+
+Rulesets do not require a selector to inherit either.
+
+    {:name}                      .rule {
+      style value                   style: value;
+    {:other-name}                   other-style: other-value;
+      :name                      }
+      other-style other-value
+    .rule
+      :other-name
+
+===Private Name Deployment
+
+Rules inherited from a name can all be made private by wrapping the name deployment in parentheses as well.  This
+is only useful if the ruleset that does this itself is named and is a selector:
+
+    .ruleset {:name}                   .ruleset {
+      style value                         style: value;
+    .other-ruleset {:other-name}       }
+      (:name)                          .other-ruleset {
+      other-style other-value             style: value;
+    .final-ruleset                        other-style: other-value;
+      :other-name                      }
+                                       .final-ruleset {
+                                          other-style: other-value;
+                                       }
+
+This applies in a similar fashion to declaring rules as private.
+
+You will notice that deploying a name privately is not useful for a selector that is not named nor is it useful
+for a name without a selector.  Attempting either of these is an error.
+
+==Nesting
+
+You can create selectors using descendents without having to rewrite ancestors.
+
+   .rule                                  .rule {
+      style value                            style: value;
+      | .sub-rule                         }
+         other-style other-value          .rule .sub-rule {
+         | .sub-sub-rule                     other-style: other-value;
+            third-style third-value       }
+      |.with-rule                         .rule .sub-rule .sub-sub-rule {
+         final-style final-value             third-style: third-value;
+                                          }
+                                          .rule.with-rule {
+                                             final-style: final-value;
+                                          }
+
+The | (pipe) operator indicates that the rule should require the parent rule as an ancestor. Note that
+whitespace after the pipe has meaning.
+
+The pipe was chosen to prevent ambiguity with rule declarations and inheritence deployment. It also simplifies
+specifying `rule-rule` syntax vs. `rule -rule`.  Finally, the pipe is rarely valid in CSS.
+
+Since most CSS rules are inherited by elements automatically, GSS chooses not to have parent rules applied
+to nested rulesets by default.  These rules can be applied with a small syntactic change described later.
+
+Note that you can use any valid CSS selector after  the pipe (or anything, but if it's not valid CSS
+it won't work properly)
+
+    .rule                                 .rule {
+      style value                            style: value;
+      | > .sub-rule                       }
+         other-style other-value          .rule > .sub-rule {
+                                             other-style: other-value;
+                                          }
+
+Note that sub rulesets can also be named.  Remember that names are global, and also remember that the name
+is irrespective of the selectors involved.  Only the rules themselves are applied to the name.
+
+Finally, a selector is required for nesting.  It is invalid to try to nest with a name only.
+
+===Creating multiple nested rulesets with multiple pipes per selector
+
+The pipe is not a valid character in CSS selectors, so GSS uses it freely to save some space.
+
+    .rule                                 /* All three equivalent in CSS */
+      | .sub-rule|.with-rule              .rule .sub-rule {
+         style value                         style: value;
+                                          }
+    .rule                                 .rule.with-rule {
+      | .sub-rule                            style: value;
+         style value                      }
+      |.with-rule
+         style value
+
+    .rule
+      | .sub-rule {:name}
+         style value
+      |.with-rule
+         :name
+
+Note that white space before and after rule declarations in the pipe matters, which is why it is written as
+`.sub-rule|.with-rule` as opposed to `.sub-rule |.with-rule`.  It wouldn't matter in this instance, but if
+a rule was nested under `.sub-rule`, it could.
+
+===Using commas in nested rulesets
+
+Sub Ruleset declarations with commas can be used to apply rules to selectors irrespective of the parent in the
+nest.
+
+    .rule                                 .rule .sub-rule, .other-sub-rule {
+      | .sub-rule, .other-rule               style: value;
+         style value                      }
+
+Beware when using this feature, because it implies that `.other-rule` is somehow nested with `.rule`, but it
+isn't.  This also has a direct impact on rules that are nested in the sub rule in this case.  This is described
+in detail later on, which may also answer the question as to why this choice was made.
+
+In order to avoid ambiguity, it is preferable to use names.
+
+    .rule                                 * SAME AS ABOVE *
+      | .sub-rule {:name}
+         style value
+    .other-rule
+      :name
+
+This has the same affect, but it does not incorrectly imply that the `.rule` and `.other-rule` selectors are
+linked.
+
+Just remember to consider that the pipe is expanded to the parent selector (all parent selectors in multiple
+nestings).
+
+    .rule                                    .rule .sub-rule, .other-sub-rule, .rule.with-rule {
+      | .sub-rule, .other-rule|.with-rule       style: value;
+         style value                         }
+
+===Inheriting specific rules
+
+As in CSS, the same selector may be used multiple times. Each selector declaration represents a different ruleset,
+and each can have a different name.
+Remember: rules from rulesets are applied to names.  Names are not tied to selectors themselves.
+
+    .rule {:name}
+      style value
+    .rule
+      unnamed-style unnamed-value
+    .rule {:other-name}
+      other-style other-value
+
+All rules declared for this ruleset will be applied to the selector.  However, you can inheret each set of
+rules independently.  You can use this to group rules.
+
+    .rule {:name}                         .rule {
+      style value                            style: value;
+    .rule                                    unnamed-style: unnamed-value;
+      unnamed-style unnamed-value            other-style: other-value;
+    .rule {:other-name}                   }
+      other-style other-value             .other-rule {
+    .other-rule                              style: value;
+      :name                               }
+    .third-rule                           .third-rule {
+      :other-name                            other-style: other-value;
+    .final-rule                           }
+      :name                               .final-rule {
+      :other-name                            style: value;
+                                             other-style: other-value;
+                                          }
+
+You can also specify which rules to inherit using the name and the rule's name or declaration.
+
+    .rule {:name}          .rule {
+      style value {:rule}     style: value;
+      style-two value-two     style-two: value-two;
+    .other-rule            }
+      :name style          .other-rule {
+    .final-rule               style: value;
+      :name :rule          }
+                           .final-rule {
+                              style: value;
+                           }
+
+===Overwriting selectors in cascade does not affect names
+
+    .rule {:name}             .rule {
+      style value                style: other-value;
+    .rule                     }
+      style other-value       .other-rule {
+    .other-rule                  style: value;
+      :name                   }
+
+The rules of the original name are still applied.  If you want the rules for the name to be overwritten,
+you must apply the name again.
+
+Remember: names function independently of selectors.  This section just reiterates that.
+
+===Adding more rules to a name
+
+You can add more rules to a name by declaring that name within a ruleset that deploys it.
+
+    .rule                              .rule {
+      style value {:name}                 style: value;
+    {:name}                            }
+      :name                            .other-rule {
+      more-style more-value               style: value;
+    {:name}                               more-style: more-value;
+      :name                               final-style final-value;
+      final-style final-value          }
+   .other-rule
+      :name
+
+New rules are applied via the cascade.
+
+If you want to append rules to a name, be careful to deploy the name in the ruleset.  If you do not do this,
+the name is overwritten by the new ruleset in the cascade instead.
+
+===Easily forcing rule inheritence in nesting
+
+Sometimes you want to nest and also inherit rules.
+
+    .rule                                 .rule {
+      style value                            style: value;
+      force-rule force-value                 force-rule: force-value;
+      | .sub-rule                         }
+         !force-rule                      .rule .sub-rule {
+                                             force-rule: force-value;
+                                          }
+
+You can also force a rule by its name.  This is not special forcing syntax, but simply default name
+deployment syntax.  It is merely noted here as a reminder.
+
+    .rule                                       *SAME AS ABOVE*
+      style value
+      force-rule force-value {:force-me}
+      | .sub-rule
+         :force-me
+
+This can also be applied more easily to rulesets if there are multiple rules
+
+    .rule {:name}                .rule {
+      style value                   style: value;
+      other-rule other-value        other-rule: other-value;
+    .rule                        }
+      | .sub-rule                .rule .sub-rule {
+         :name                      style: value;
+                                    other-rule: other-value;
+                                 }
+
+Notice that the ruleset is named separately.  Not doing so would induce recursion (discussed later).
+
+Finally, you can force all rules from all parents easily with a simple operator.
+
+    .rule                                 .rule {
+      style value                            style: value;
+      |! .sub-rule                        }
+         other-style other-value          .rule .sub-rule {
+                                             style: value;
+                                             other-style: other-value;
+                                          }
+
+The force operator is `|!` (not `| !` or a variant).
+
+The force operator only works in the immediate parent.  If you want to inherit rules from two parents up (or
+higher), without the immediate parent inheriting a the rules, you must use names or simply rewrite the rules.
+
+    .rule                              .rule {
+      style value {:name}                 style: value;
+      | sub-rule                       }
+         sub-style sub-value           .rule .sub-rule {
+         |! sub-sub-rule                  sub-style: sub-value;
+            :name                      }
+         |! alternate-sub-sub-rule     .sub-sub-rule {
+            style value                   sub-style: sub-value;
+                                          style: value;
+                                       }
+                                       .alternate-sub-sub-rule {
+                                          sub-style: sub-value;
+                                          style: value;
+                                       }
+
+As implied above, forced inheritence will cascade to sub rulesets.
+
+    .rule                              .rule {
+      style value                         style: value;
+      |! sub-rule                      }
+         |! sub-sub-rule               .rule .sub-rule {
+                                          style: value;
+                                       }
+                                       .rule .sub-rule .sub-sub-rule {
+                                          style: value;
+                                       }
+
+Note that the default of many css rules is to inherit them, so using the force operator in nesting should not
+be necessary the majority of the time.
+
+===Sub rulesets are applied to comma-separated parents independently
+
+    .rule, .other-rule     .rule .sub-rule, .other-rule .sub-rule {
+      | .sub-rule             style: value;
+         style value       }
+
+As described above, a comma used in a sub-rule does not have its parents applied, so beware of this.  If you
+want the parents applied, you need to use a pipe.  Compare
+
+   .rule, .other-rule                  .rule .sub-rule, .other-rule .sub-rule, .other-sub-rule {
+      | .sub-rule, .other-sub-rule        style: value;
+         style value                   }
+
+Vs.
+
+    .rule, .other-rule                 .rule .sub-rule, .rule .other-sub-rule {
+      | .sub-rule| .other-sub-rule        style: value;
+         style value                   }
+                                       .other-rule .sub-rule, .other-rule .other-sub-rule {
+                                          style: value;
+                                       }
+
+Comma rules for parents also apply to parents that are themselves nested.
+
+    .rule, .other-rule                 .rule .sub-rule .sub-sub-rule, .other-rule .sub-rule .sub-sub-rule {
+      | .sub-rule, .other-sub-rule        style: value;
+         | .sub-sub-rule               }
+            style value                .other-sub-rule .sub-sub-rule {
+                                          style: value;
+                                       }
+
+Here is where using a comma instead of a pipe in a nested selector directly affects the stylesheet.
+`.other-sub-rule` gets to use the other nested selectors in its nesting, and it is treated like a master selector.
+
+==Inheriting Nested Rules
+
+Inheritance applies to nested rules
+
+   .rule {:name}                    .rule {
+      style value                      style: value;
+      | .sub-rule                   }
+         other-style other-value    .rule .sub-rule {
+   .other-rule                         other-style: other-value;
+      :name                         }
+                                    .other-rule {
+                                       style: value;
+                                    }
+                                    .other-rule .sub-rule {
+                                       other-style: other-value;
+                                    }
+
+Rules on privacy also apply with inheritence
+
+    .rule {:name}                      .rule {
+      (style value)                       style: value;
+      other-style other-value             other-style: other-value;
+      |! .sub-rule                     }
+         third-style third-value       .rule .sub-rule {
+      | .other-sub-rule                   other-style: other-value;
+         final-style final-value          third-style: third-value;
+   .other-rule
+      :name                            .rule .other-sub-rule {
+                                          final-style: final-value;
+                                       }
+                                       .other-rule {
+                                          other-style: other-value;
+                                       }
+                                       .other-rule .sub-rule {
+                                          other-style: other-value;
+                                          third-style: third-value;
+                                       }
+                                       .other-rule .other-sub-rule {
+                                          final-style: final-value;
+                                       }
+
+When a name is deployed, you can consider the selector (if any) that is deploying to be the pipe in the
+expansion of the rules.  Remember that comma-separated selectors in nested rules don't apply, so you can
+consider the comma to have no effect on a named rule at all.  This is especially true of comma separation
+in the master selector because, as has been said, naming applies to the ruleset, not the selector.
+
+    .rule, .other-rule {:name}         .rule .sub-rule, .other-rule .sub-rule, .other-sub-rule {
+      | .sub-rule, .other-sub-rule        style: value;
+         style value                   }
+    .calling-rule                      .calling-rule .sub-rule {
+      :name                               style: value;
+                                       }
+
+Note that `.other-sub-rule` and `.calling-rule` are irrelated.
+
+===Private Sub Rulesets
+
+Sub rulesets can also be marked as private with parentheses:
+
+    .rule {:name}                      .rule {
+      style value                         style: value;
+      |( .sub-rule)                    }
+         other-style other-value       .sub-rule {
+    .other-rule                           style: value
+      :name                               other-style: other-value
+                                       }
+                                       .other-rule {
+                                          style: value;
+                                       }
+
+Notice that there is no `.other-rule .sub-rule` ruleset even after the name deployment.
+
+The parentheses must wrap all selectors to be made privateseparated by pipes.  The paren themselves can close
+over the pipes, and these will be treated as independent, private nested selectors, but it is also valid to wrap
+each pipe-separated selector in its own set of parentheses.  Commas are not allowed in parentheses.  It would
+not make sense to wrap a comma-separated nested master selector.  No characters, whitespace included, are allowed
+between the parentheses and the pipes.  All whitespace inside the selectors applies.
+
+    .rule {:name}                                                 .rule {
+      style value                                                    style: value;
+      |( .sub-rule|.with-rule)| .inherited-rule, .other-rule    }
+         other-style other-value                                  .rule .sub-rule, .rule.with-rule {
+   .inheriting-rule                                                  other-style: other-value;
+      :name                                                       }
+                                                                  .rule .inherited-rule, .other-rule {
+                                                                     other-style: other-value;
+                                                                  }
+                                                                  .inheriting-rule {
+                                                                     style: value;
+                                                                  }
+                                                                  .inheriting-rule .inherited-rule {
+                                                                     other-style: other-value;
+                                                                  }
+
+The following would have the same effect.
+
+    .rule {:name}
+      style value
+      |( .sub-rule)|(.with-rule)| .inherited-rule, .other-rule
+         other-style other-value
+    .inheriting-rule
+      :name
+
+You could also declare `.with-rule` after `.inherited-rule`.  If you wanted to have `.other-rule` and keep all
+other declarations private, you would have to have `|,` because nothing is allowed between paren and the pipes
+(so `),` would not be allowed).  GSS throws out empty selectors.
+
+===Recursion
+
+It is possible to recur declarations by having a nested ruleset call its parent in the same declaration
+
+    .rule {:name}       .rule {
+      style value          style: value;
+      | .sub-rule       }
+         :name          .rule .sub-rule {
+                           style: value;
+                        }
+                        .rule .sub-rule .sub-rule {
+                           style: value;
+                        }
+
+Notice that `.sub-rule` is applied as a child to itself.
+
+Recursion is unlikely to have an effect depending upon the selectors you are using, but it may be undesirable.
+You can avoid it by naming a ruleset separately from its nested rules, or you can declare the nested selector
+as private (but then it won't be part of the name).
+
+    .rule {:name}       .rule {
+      style value          style: value;
+      |( .sub-rule)     }
+         :name          .rule .sub-rule {
+                           style: value;
+                        }
+
+`.sub-rule` does not inherit `.sub-rule` from `:name`.
+
+Remember that you can inherit all rules from an immediate parent with the |! operator.  It should be very rare
+that you have to call a parent's name in a nested selector that is part of the name ruleset.
+
+===Named ruleset clumping
+
+You can apply a name to multiple rules in a ruleset.
+
+    .rule                                 .rule {
+      {:name}                                style: value;
+         style value                         other-style: other-value;
+         other-style other-value             third-style: third-value;
+      {:other-name}                          final-style: final-value;
+         third-style third-value          }
+      final-style final-value             .other-rule {
+    .other-rule                              style: value;
+      :name                                  other-style: other-value;
+    .final-rule                           }
+      :other-name                         .final-rule {
+                                             third-style: third-value;
+                                          }
+
+You can also nest names, but parent and child names ignore each other.  This is not true nesting.
+
+    .rule                                 .rule {
+      {:name}                                style: value;
+         style value                         other-style: other-value;
+         {:other-name}                    }
+            other-style other-value       .other-rule {
+    .other-rule                              style: value;
+      :name                                  other-style: other-value;
+    .final-rule                           }
+      :other-name                         .final-rule {
+                                             other-style: other-value;
+                                          }
+
+Remember that selectors are required for nesting.  It would be invalid to declare a nested selector under a
+clumping name in a ruleset.  The following is invalid GSS.
+
+    .rule
+      {:name}
+         |.sub-rule
+
+Omitting the pipe is valid, but `.sub-rule` would then be treated as a rule, not a nested selector.
+
+Selectors are not required for clumping.
+
+==Multiple inheritence
+
+You can inherit from multiple rulesets.  Simploy deploy the name of the ruleset you want on each
+line.  If a name inherits rules via name deployment, those rules will also be applied when the name
+is deployed.
+
+    .rule {:name}                   .rule {
+      style value                      style: value;
+    .other-rule {:other-name}       }
+      :name                         .other-rule {
+      other-style other-value          style: value;
+    .third-rule                        other-style: other-value;
+      :other-name                   }
+    .fourth-rule {:final-name}      .third-rule {
+      final-style final-value          style: value;
+    .fifth-rule                        other-style: other-value;
+      :name                         }
+      :final-name                   .fourth-rule {
+    .final-rule                        final-style final-value
+      :other-name                   }
+      :final-name                   .fifth-rule {
+                                       style: value;
+                                       final-style: final-value;
+                                    }
+                                    .final-rule {
+                                       style: rule;
+                                       other-style: other-value;
+                                       final-style: final-value;
+                                    }
+
+Notice that `.final-rule` inherits all rules described even though it only deploys two of three names.
+This is because `:other-name` inherited the rules of `:name` by deploying `:name` itself.
+
+==Canceling inherited rules
+
+Once a rule has been inherited, you cannot cancel it directly.  Instead, you have to override it in the
+cascade.  Be careful about what rules you define in names and which names you deploy.  Try to keep your names
+as finely grained as possible (or is reasonable for your application).
+
+==Taking advantage of the cascade
+
+Cascading still applies in GSS just as it would in CSS.  You should take advantage of this when appropriate, as
+it may obviate the need for cancelation in many places:
+
+    .rule {:name}                   .rule {
+      style value                      style: value;
+      other-style other-value          other-style: other-value;
+    .other-rule                     }
+      :name                         .other-rule {
+      style other-value                other-style: other-value;
+                                       style: other-value;
+                                    }
+
+Notice that `.other-rule` overwrites the `style` rule it inherited from the `:name` name.  Order matters with
+name deployment as well.  If the name were deployed first, the inherited `style` rule would overwrite the
+rule declared specifically in the `.other-rule` ruleset.
+
+==Macros
+
+You can create and call macros for rules.  Macros must be declared in the global scope because of a possible
+syntax collision with private rulesets syntax (private rulesets can never be in the global scope).
+This choice was made because scoped macros would probably not be very helpful.
+
+    (macro-name arg1 arg2)          .rule {
+      rule-left {arg1}                 rule-left: 10px;
+      rule-right {arg2}                rule-right: 10px;
+    .rule                           }
+      macro-name(10px 10px)
+
+Macros are called with macro-name(<args>).  There must not be a space between the macro name and the paren.
+Otherwise, it will be treated as a rule.
+
+Macros can only be called in rulesets.  They can be called at any level of nesting, and they will apply to
+the current nest level.
+
+Macros also work with the cascade.  This requires them to be declared before they are used.  A call to an
+undefined macro is an error.
+
+Note that arguments to macros become variables in the scope of the macro.
+
+Macro arguments are separated by a space.  If you want to include a space in an argument value, you must
+escape the space (\ ). Wrapping spaces in quotes does not have this effect.
+
+Note that argument values with quotes include the quotes as part of the value.
+
+You cannot use macros in rule values as this can collide with css rules:
+
+   .rule                            .rule {
+      background-image url(link)       background-image: url(link);
+                                    }
+
+url() will not call a macro and is safe to use for the value.
+
+Macros must define rulesets and only rulesets (the macro itself can be considered a ruleset name).  This aligns
+with the philosophy that macros cannot be used for rule values.
+
+Macro rulesets require selectors.  Name declarations are illegal inside of macros (but name deployments are
+okay).  Global variables can be used in macros too, but take care to avoid collision with argument names.
+
+===Default argument values
+
+You can declare default values for macro arguments with the = operator
+
+    (macro-name arg1=10px)       .rule {
+      left {arg1}                   left: 20px;
+    .rule                        }
+      macro-name(20px)           .other-rule {
+    .other-rule                     left: 10px;
+      macro-name()               }
+
+You can include = in an argument value if you want without escaping it.  Only spaces and close parent require
+backslash escaping to prevent ambiguity of multiple arguments or the end of the macro declaration.
+
+===Overriding macros
+
+You can override a previously declared macro using the cascade.
+
+    (macro)                .rule {
+      left 10px               left: 10px;
+    .rule                  }
+      macro()              .other-rule {
+    (macro)                   right: 10px;
+      right 10px           }
+    .other-rule
+      macro()
+
+===Using parameter names to change argument order
+
+You can reference parameter names to specify arguments in any order:
+
+    (macro left right)                 .rule {
+      left {left}                         left: left;
+      right {right}                       right: right;
+    .rule                              }
+      macro(right=right left=left)
+
+===Macros calling macros
+
+Macros can also call macros
+
+    (macro-top)         .rule {
+      top 50px             top: 50px;
+    (macro-fixed)          position: fixed;
+      macro-top()       }
+      position fixed
+    .rule
+      macro-fixed()
+
+The same rules for macro calling apply when they are called in macros as when they are called in any other
+rulesets.
+
+===Macros containing rulesets
+
+Macros can also contain entire rulesets with selectors.  These rulesets are nested with the caller as the parent.
+
+     (macro)                         .master {
+       .rule, .other-rule               style: value;
+         other-style other-value     }
+     .master                         .master .rule, .master .other-rule {
+      style value                       other-style: other-value;
+      macro()                        }
+
+Note that rules with commas are handled differently than nested rules.  Every comma-separated rule in the macro
+is treated as a nested rule of the caller.
+
+Rulesets in macros can also be nested with the pipe.
+
+     (macro)                                    .master .rule, .master .other-rule {
+      .rule, .other-rule                           style: value;
+         style value                            }
+         | .nested-rule, .nested-outer-rule     .master .rule .nested-rule, .master .other-rule .nested-rule {
+            nested-style nested-value              nested-style: nested-value;
+     .master                                    }
+       macro()                                  .master .nested-outer-rule {
+                                                   nested-style: nested-value;
+                                                }
+
+Note that `.nested-outer-rule`, using the comma, is not nested by `.rule` or `.other-rule`, but it is nested by
+the macro caller.  When a macro is called, you can consider all comma-separated selectors to be nested under
+the calling ruleset.
+
+==Predefined functions
+
+GSS comes with many predefined functions that use Python code to calculate some value based on passed arguments.
+
+    .rule
+      color darken: blue 50%
+
+Because GSS rules do not require colons, functions are called with colons to prevent possible collisions with
+CSS syntax.  As with macros, arguments are separated by spaces.  The space after the colon is optional.
+
+Functions can only be called in variable declarations (next section) or as rule values.  If you have syntax
+that would look like a function call in another context, it will be treated as a selector or a rule as is
+appropriate to the situation
+
+===Writing function values to variables
+
+This is simple:
+
+    {darkblue darken: blue 50%}  // {darkblue} has a value of 00007F
+
+If you want to use an actual colon in the variable value, it must be escaped with a backslash.
+
+    {darkblue darken\: blue 50%}  // {darkblue} has a value of darken\: blue 50%
+
+Functions are still called when wrapped in quotes.  GSS does not have any concept of string literals.
+
+    {darkblue "darken: blue 50%"}  // {darkblue} has a value of "00007F", quotes included.
+
+Note that the colon only needs to be escaped if there is ambiguity about a function name.  Function names must
+be valid python function names. This is not particularly useful, since colons are used only as rule-value
+separator in CSS, and GSS handles this automatically.
+
+===Creating your own functions
+
+You can add custom functions to GSS by updating the GSS::GssCustomFunctions class.
+
+===Limiting arguments to functions
+
+You can wrap function arguments in parentheses:
+
+    .rule
+      rule darken: (blue 50%) more-value
+
+In this case, `more-value` does not become an argument to the function.
+
+==Dash rules
+
+You can use a - (dash) at the end of a rule declaration to create sub rules.  This can be done for anything,
+even if the CSS rules that are created do not exist in the W3C spec, so use it wisely.
+
+   .rule             .rule {
+      margin-           margin-top: 5px;
+         top 5px        margin-bottom: 6px;
+         bottom 6px     margin-right: 7px;
+         right 7px      margin-left: 8px;
+         left 8px    }
+   .invalid-rule     .invalid-rule {
+      margi-            margi-n-top: tpx;
+         n-top tpx   }
+
+===Dash rules can also be named.
+
+This is different from naming a selector rule in that the dash part of the rule is prepended even when the
+name is deployed.
+
+    .rule               .rule {
+       font- {:name}       font-weight: bold;
+         weight bold       font-size: 9pt;
+         size 9pt       }
+    .other-rule         .other-rule {
+      :name                font-weight: bold;
+                           font-size: 9pt;
+                        }
+
+===Inheriting all dash rules with the rule name
+
+You can specify the rule name with or without the dash (it's optional) as part of the name to inerhit it
+
+   .rule {:name}        .rule {
+      margin-              margin-left: 5px;
+         left 5px          margin-right: 5px;
+         right 5px         padding-left: 5px;
+      padding-             padding-right: 5px;
+         left 5px       }
+         right 5px      .other-rule {
+   .other-rule             margin-left: 5px;
+      :name margin-        margin-right: 5px;
+   .final-rule          }
+      :name padding     .final-rule {
+                           padding-left: 5px;
+                           padding-right: 5px;
+                        }
